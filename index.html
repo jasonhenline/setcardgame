@@ -85,6 +85,12 @@
           >
             Find Set
           </button>
+          <button
+            id="fill-random-btn"
+            class="px-5 py-2 bg-purple-500 text-white font-semibold rounded-lg shadow-md hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-opacity-75 transition-all"
+          >
+            Fill Random
+          </button>
         </div>
         <!-- Message Area -->
         <div id="message-area" class="mt-4 text-lg font-medium h-6"></div>
@@ -184,6 +190,7 @@
         const addRowBtn = document.getElementById("add-row-btn");
         const removeRowBtn = document.getElementById("remove-row-btn");
         const findSetBtn = document.getElementById("find-set-btn");
+        const fillRandomBtn = document.getElementById("fill-random-btn");
         const messageArea = document.getElementById("message-area");
 
         const INITIAL_ROWS = 4;
@@ -191,9 +198,10 @@
 
         let activeSlot = null;
         let selectedCard = {};
+        let foundSets = [];
+        let currentSetIndex = -1;
 
         // --- SVG Generation ---
-
         const colors = {
           red: "#ef4444",
           green: "#22c55e",
@@ -239,37 +247,70 @@
             isPropertySet(c1.count, c2.count, c3.count)
           );
         }
-        function findAndHighlightSet() {
+
+        /**
+         * Resets the found sets state. Called whenever the board changes.
+         */
+        function resetFoundSetsState() {
+          foundSets = [];
+          currentSetIndex = -1;
           clearHighlights();
-          const filledSlots = Array.from(
-            document.querySelectorAll(".filled-card")
-          );
-          const cards = filledSlots.map((slot) => ({
-            ...JSON.parse(slot.dataset.card),
-            element: slot,
-          }));
-          if (cards.length < 3) {
-            showMessage("Not enough cards to form a set.", "text-red-500");
-            return;
-          }
-          for (let i = 0; i < cards.length; i++) {
-            for (let j = i + 1; j < cards.length; j++) {
-              for (let k = j + 1; k < cards.length; k++) {
-                if (isSet(cards[i], cards[j], cards[k])) {
-                  showMessage("Set found!", "text-green-500");
-                  [
-                    cards[i].element,
-                    cards[j].element,
-                    cards[k].element,
-                  ].forEach((el) => el.classList.add("highlight"));
-                  setTimeout(clearHighlights, 3000);
-                  return;
+          showMessage("", "");
+        }
+
+        /**
+         * Finds all sets on the board, then cycles through highlighting them on each call.
+         */
+        function cycleThroughSets() {
+          clearHighlights();
+
+          // If we haven't searched for sets yet (or if the board has changed), find them all.
+          if (foundSets.length === 0 && currentSetIndex === -1) {
+            const filledSlots = Array.from(
+              document.querySelectorAll(".filled-card")
+            );
+            const cards = filledSlots.map((slot) => ({
+              ...JSON.parse(slot.dataset.card),
+              element: slot,
+            }));
+
+            if (cards.length < 3) {
+              showMessage("Not enough cards to form a set.", "text-red-500");
+              return;
+            }
+
+            // Find ALL sets and store them
+            for (let i = 0; i < cards.length; i++) {
+              for (let j = i + 1; j < cards.length; j++) {
+                for (let k = j + 1; k < cards.length; k++) {
+                  if (isSet(cards[i], cards[j], cards[k])) {
+                    foundSets.push([
+                      cards[i].element,
+                      cards[j].element,
+                      cards[k].element,
+                    ]);
+                  }
                 }
               }
             }
           }
-          showMessage("No sets present on the board.", "text-yellow-600");
+
+          // Now, cycle through the found sets
+          if (foundSets.length > 0) {
+            currentSetIndex = (currentSetIndex + 1) % foundSets.length;
+            const setToHighlight = foundSets[currentSetIndex];
+            setToHighlight.forEach((el) => el.classList.add("highlight"));
+            showMessage(
+              `Showing set ${currentSetIndex + 1} of ${foundSets.length}`,
+              "text-green-500"
+            );
+          } else {
+            // This handles the case where the initial search found nothing.
+            showMessage("No sets present on the board.", "text-yellow-600");
+            currentSetIndex = -1; // Allows re-searching if board doesn't change
+          }
         }
+
         function clearHighlights() {
           document
             .querySelectorAll(".highlight")
@@ -278,6 +319,45 @@
         function showMessage(text, colorClass) {
           messageArea.textContent = text;
           messageArea.className = `mt-4 text-lg font-medium h-6 ${colorClass}`;
+        }
+
+        // --- Deck and Randomization ---
+        function generateDeck() {
+          const deck = [];
+          const properties = {
+            shapes: ["diamond", "squiggle", "oval"],
+            fills: ["solid", "striped", "open"],
+            counts: ["1", "2", "3"],
+            colors: ["red", "green", "purple"],
+          };
+          for (const shape of properties.shapes)
+            for (const fill of properties.fills)
+              for (const count of properties.counts)
+                for (const color of properties.colors)
+                  deck.push({ shape, fill, count, color });
+          return deck;
+        }
+        function shuffle(array) {
+          for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+          }
+        }
+        function fillBoardRandomly() {
+          resetFoundSetsState();
+          const deck = generateDeck();
+          shuffle(deck);
+          const slots = cardGrid.children;
+          for (let i = 0; i < slots.length; i++) {
+            const slot = slots[i];
+            const cardData = deck.pop();
+            if (cardData) {
+              slot.dataset.card = JSON.stringify(cardData);
+              slot.innerHTML = generateCardSVG(cardData);
+              slot.className =
+                "card-slot filled-card aspect-[3/2] bg-white rounded-lg transition-all duration-200";
+            }
+          }
         }
 
         // --- Grid Management ---
@@ -290,30 +370,28 @@
           return cardSlot;
         }
         function addRow() {
+          resetFoundSetsState();
           const currentCardCount = cardGrid.children.length;
           for (let i = 0; i < COLS; i++)
             cardGrid.appendChild(createEmptyCardSlot(currentCardCount + i));
         }
         function removeRow() {
           if (cardGrid.children.length > COLS) {
+            resetFoundSetsState();
             for (let i = 0; i < COLS; i++) cardGrid.lastElementChild.remove();
           }
         }
         function initializeGrid() {
           cardGrid.innerHTML = "";
           for (let i = 0; i < INITIAL_ROWS; i++) addRow();
+          resetFoundSetsState();
         }
 
         // --- Modal Logic ---
-
-        /**
-         * Dynamically updates the content of a step in the picker modal.
-         */
         function updatePickerUI(stepName) {
           const stepEl = document.getElementById(`step-${stepName}`);
           const container = stepEl.querySelector(".grid");
-          container.innerHTML = ""; // Clear previous options
-
+          container.innerHTML = "";
           const options = {
             shape: {
               values: ["diamond", "squiggle", "oval"],
@@ -329,39 +407,30 @@
               labels: ["Red", "Green", "Purple"],
             },
           };
-
           options[stepName].values.forEach((value, index) => {
             let previewCard = { ...selectedCard };
-
-            // Configure the preview card based on the current step
-            if (stepName === "shape") {
+            if (stepName === "shape")
               previewCard = {
                 shape: value,
                 fill: "open",
                 count: "1",
                 color: "black",
               };
-            } else if (stepName === "fill") {
+            else if (stepName === "fill") {
               previewCard.fill = value;
               previewCard.count = "1";
               previewCard.color = "black";
             } else if (stepName === "count") {
               previewCard.count = value;
               previewCard.color = "black";
-            } else if (stepName === "color") {
-              previewCard.color = value;
-            }
-
+            } else if (stepName === "color") previewCard.color = value;
             const button = document.createElement("button");
             button.dataset.value = value;
             button.className =
               "picker-option p-2 border rounded-lg hover:bg-blue-100 hover:border-blue-400 transition";
-            button.innerHTML = `
-                        <div class="h-16 w-full">${generateCardSVG(
-                          previewCard
-                        )}</div>
-                        <span>${options[stepName].labels[index]}</span>
-                    `;
+            button.innerHTML = `<div class="h-16 w-full">${generateCardSVG(
+              previewCard
+            )}</div><span>${options[stepName].labels[index]}</span>`;
             container.appendChild(button);
           });
         }
@@ -403,7 +472,7 @@
 
         function resetPicker() {
           selectedCard = {};
-          updatePickerUI("shape"); // Initialize the first step
+          updatePickerUI("shape");
           document
             .querySelectorAll(".picker-step")
             .forEach((step) => step.classList.add("hidden"));
@@ -420,7 +489,7 @@
           };
           const nextStep = nextStepMap[step];
           if (nextStep) {
-            updatePickerUI(nextStep); // Generate UI for the next step
+            updatePickerUI(nextStep);
             document.getElementById(`step-${step}`).classList.add("hidden");
             document
               .getElementById(`step-${nextStep}`)
@@ -432,6 +501,7 @@
 
         function finalizeCardSelection() {
           if (!activeSlot) return;
+          resetFoundSetsState();
           activeSlot.dataset.card = JSON.stringify(selectedCard);
           activeSlot.innerHTML = generateCardSVG(selectedCard);
           activeSlot.classList.remove(
@@ -464,7 +534,8 @@
         });
         addRowBtn.addEventListener("click", addRow);
         removeRowBtn.addEventListener("click", removeRow);
-        findSetBtn.addEventListener("click", findAndHighlightSet);
+        findSetBtn.addEventListener("click", cycleThroughSets);
+        fillRandomBtn.addEventListener("click", fillBoardRandomly);
 
         // --- Initial Call ---
         initializeGrid();
